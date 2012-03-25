@@ -1,0 +1,18 @@
+=======
+pycielo
+=======
+
+pycielo é uma biblioteca python para a integração com o sistema de pagamentos das Cielo
+
+Dependências
+------------
+
+lxml
+
+pycurl
+
+
+Licença
+-------
+
+Esta biblioteca é distribuida sobre a licença New BSD License, cuja cópia pode ser obtida no arquivo LICENSE
