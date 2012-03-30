@@ -72,7 +72,7 @@ class Cielo(object):
 
     def setPedido(self, pedido, valor):
         self.__pedido = str(pedido)
-        self.__valor = valor
+        self.__valor = str(valor)
 
     def setRetorno(self, retorno):
         self.__retorno = retorno
