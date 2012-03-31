@@ -9,6 +9,16 @@ from lxml import etree
 from lxml.builder import E
 import pycurl
 
+
+BANDEIRAS = (
+    ('visa', 'Visa'),
+    ('mastercard', 'Mastercard'),
+    ('diners', 'Diners'),
+    ('discover', 'Discover'),
+    ('elo', 'Elo'),
+    )
+
+
 class Status(object):
     CRIADA = 0
     EM_ANDAMENTO = 1
@@ -27,52 +37,77 @@ class Status(object):
     def __repr__(self):
         return '<Status: %s>' % self._status
 
+
+class RequisicaoTransacao(object):
+
+    def __init__(self, cielo, _id):
+        self.__cielo = cielo
+        self.__id = _id
+
+    def enviar(self):
+        e = E("requisicao-transacao",
+            {
+                'id': str(self.__id),
+                'versao': self.__cielo.VERSION,
+            },
+            self.__cielo.dadosEc(),
+            self.__cielo.dadosPedido(),
+            self.__cielo.formaPagamento(),
+            self.__cielo.urlRetorno(),
+            self.__cielo.autorizar(),
+            self.__cielo.capturar(),
+        )
+        doc = etree.tostring(e, pretty_print=True)
+
+        return self.__cielo.send(doc)
+
+
 class Transacao(object):
 
     tid = None
     url = None
-    _status = None
     valor = None
+    __status = None
 
-    def __init__(self, tree):
-        self.__tree = tree
+    def __init__(self, root):
+        self.__root = root
 
-        self.tid = self.__tree.xpath('/b:transacao/b:tid', namespaces={'b': 'http://ecommerce.cbmp.com.br'})[0].text
-        r = self.__tree.xpath('/b:transacao/b:url-autenticacao', namespaces={'b': 'http://ecommerce.cbmp.com.br'})
+        self.tid = self.__root.xpath('/transacao/tid')[0].text
+        r = self.__root.xpath('/transacao/url-autenticacao')
         if len(r) > 0:
             self.url = r[0].text
-        r = self.__tree.xpath('/b:transacao/b:status', namespaces={'b': 'http://ecommerce.cbmp.com.br'})
+        r = self.__root.xpath('/transacao/status')
         if len(r) > 0:
             self.status = r[0].text
 
-        r = self.__tree.xpath('/b:transacao/b:captura/b:valor', namespaces={'b': 'http://ecommerce.cbmp.com.br'})
+        r = self.__root.xpath('/transacao/captura/valor')
         if len(r) > 0:
             self.valor = Decimal(r[0].text) / Decimal('100')
 
     def pprint(self):
-        print etree.tostring(self.__tree, pretty_print=True)
+        print etree.tostring(self.__root, pretty_print=True)
 
-    def __get_status(self):
-        return self._status
-    def __set_status(self, value):
-        self._status = Status(value)
-    status = property(__get_status, __set_status)
+    @property
+    def status(self):
+        return self.__status
+
+    @status.setter
+    def status(self, value):
+        self.__status = Status(value)
+
 
 class Cielo(object):
 
-    VERSION = '1.1.0'
+    VERSION = '1.1.1'
     URL = "https://qasecommerce.cielo.com.br/servicos/ecommwsec.do"
 
-    def __init__(self):
-        pass
-
-    def setEc(self, storeid, storekey):
+    def __init__(self, storeid, storekey):
         self.__store_id = storeid
         self.__sotre_key = storekey
 
     def setPedido(self, pedido, valor):
         self.__pedido = str(pedido)
-        self.__valor = str(valor)
+        self.__valor = str(int(valor * 100))
 
     def setRetorno(self, retorno):
         self.__retorno = retorno
@@ -80,6 +115,8 @@ class Cielo(object):
     def setFormaPag(self, bandeira, produto, parcelas):
         #bandeira:
         # visa, mastercard, diners, discover ou elo
+        if not filter(lambda y: y[0] == bandeira, BANDEIRAS):
+            raise ValueError(bandeira)
 
         #produto:
         # 1 (Credito a Vista),
@@ -150,19 +187,8 @@ class Cielo(object):
 
         return self.send(doc)
 
-    def requestTransacao(self, id):
-
-        e = E("requisicao-transacao", {'id': str(id), 'versao': self.VERSION},
-            self.dadosEc(),
-            self.dadosPedido(),
-            self.formaPagamento(),
-            self.urlRetorno(),
-            self.autorizar(),
-            self.capturar(),
-        )
-        doc = etree.tostring(e, pretty_print=True)
-
-        return self.send(doc)
+    def requisicaoTransacao(self, _id):
+        return RequisicaoTransacao(self, _id)
 
     def requestConsulta(self, id, tid):
 
@@ -227,6 +253,11 @@ class Cielo(object):
         c.setopt(pycurl.MAXREDIRS, 10)
         c.setopt(pycurl.CONNECTTIMEOUT, 10)
         c.setopt(pycurl.POST, 1)
+        # Default SSL version didn't work, verify why
+        c.setopt(pycurl.SSLVERSION, pycurl.SSLVERSION_SSLv3)
+        c.setopt(pycurl.HTTPHEADER, [
+            "Content-type: application/x-www-form-urlencoded",
+            ])
         c.setopt(pycurl.POSTFIELDS, post)
         c.setopt(pycurl.TIMEOUT, 10)
         c.setopt(pycurl.WRITEFUNCTION, t.write)
@@ -235,15 +266,13 @@ class Cielo(object):
         c.close()
 
         t.seek(0)
-        tree = etree.parse(t)
-        root = tree.getroot()
-        if root.nsmap:
-            tag = root.tag.replace('{%s}' % root.nsmap.values()[0], '')
-            if tag == 'erro':
-                dic = {
-                    'errno': root.xpath('//p:codigo', namespaces={'p': 'http://ecommerce.cbmp.com.br'})[0].text,
-                    'errmsg': root.xpath('//p:mensagem', namespaces={'p': 'http://ecommerce.cbmp.com.br'})[0].text
-                }
-                raise ValueError(dic)
-        transacao = Transacao(tree)
+        # I dont want to use namespaces! It is boring
+        root = etree.fromstring(re.sub(r' xmlns="(.+?)"', '', t.getvalue()))
+        if root.tag == 'erro':
+            dic = {
+                'errno': root.xpath('//codigo')[0].text,
+                'errmsg': root.xpath('//mensagem')[0].text
+            }
+            raise ValueError(dic)
+        transacao = Transacao(root)
         return transacao
