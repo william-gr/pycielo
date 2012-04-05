@@ -38,35 +38,12 @@ class Status(object):
         return '<Status: %s>' % self._status
 
 
-class RequisicaoTransacao(object):
-
-    def __init__(self, cielo, _id):
-        self.__cielo = cielo
-        self.__id = _id
-
-    def enviar(self):
-        e = E("requisicao-transacao",
-            {
-                'id': str(self.__id),
-                'versao': self.__cielo.VERSION,
-            },
-            self.__cielo.dadosEc(),
-            self.__cielo.dadosPedido(),
-            self.__cielo.formaPagamento(),
-            self.__cielo.urlRetorno(),
-            self.__cielo.autorizar(),
-            self.__cielo.capturar(),
-        )
-        doc = etree.tostring(e, pretty_print=True)
-
-        return self.__cielo.send(doc)
-
-
 class Transacao(object):
 
     tid = None
     url = None
     valor = None
+    captura = None
     __status = None
 
     def __init__(self, root):
@@ -80,9 +57,11 @@ class Transacao(object):
         if len(r) > 0:
             self.status = r[0].text
 
-        r = self.__root.xpath('/transacao/captura/valor')
+        r = self.__root.xpath('/transacao/captura')
         if len(r) > 0:
-            self.valor = Decimal(r[0].text) / Decimal('100')
+            captura = r[0]
+            valor = captura.xpath('./valor')[0]
+            self.valor = Decimal(valor) / Decimal('100')
 
     def pprint(self):
         print etree.tostring(self.__root, pretty_print=True)
@@ -188,9 +167,24 @@ class Cielo(object):
         return self.send(doc)
 
     def requisicaoTransacao(self, _id):
-        return RequisicaoTransacao(self, _id)
 
-    def requestConsulta(self, id, tid):
+        e = E("requisicao-transacao",
+            {
+                'id': str(_id),
+                'versao': self.VERSION,
+            },
+            self.dadosEc(),
+            self.dadosPedido(),
+            self.formaPagamento(),
+            self.urlRetorno(),
+            self.autorizar(),
+            self.capturar(),
+        )
+        doc = etree.tostring(e, pretty_print=True)
+
+        return self.send(doc)
+
+    def requisicaoConsulta(self, id, tid):
 
         e = E("requisicao-consulta", {'id': str(id), 'versao': self.VERSION},
             E('tid', tid),
@@ -223,21 +217,31 @@ class Cielo(object):
 
         return self.send(doc)
 
-    def requestAutorizacaoTid(self, id, tid):
+    def requisicaoAutorizacaoTid(self, _id, tid):
 
-        doc = Document()
+        e = E("requisicao-autorizacao-tid",
+            {
+                'id': str(_id),
+                'versao': self.VERSION,
+            },
+            E("tid", tid),
+            self.dadosEc(),
+        )
+        doc = etree.tostring(e, pretty_print=True)
+        return self.send(doc)
 
-        # Create the <requisicao-autorizacao-tid> base element
-        rat = doc.createElement("requisicao-autorizacao-tid")
-        rat.setAttribute("id", str(id))
-        rat.setAttribute("versao", self.VERSION)
+    def requisicaoCaptura(self, _id, tid, valor):
 
-        tidn = doc.createElement('tid')
-        tidn.appendChild(doc.createTextNode(tid))
-        rat.appendChild(tidn)
-        rat.appendChild(self.dadosEc(doc))
-        doc.appendChild(rat)
-
+        e = E("requisicao-captura",
+            {
+                'id': str(_id),
+                'versao': self.VERSION,
+            },
+            E("tid", tid),
+            self.dadosEc(),
+            E("valor", str(int(valor * Decimal('100')))),
+        )
+        doc = etree.tostring(e, pretty_print=True)
         return self.send(doc)
 
     def send(self, xml):
