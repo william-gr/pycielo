@@ -3,7 +3,6 @@ import datetime
 from cStringIO import StringIO
 from decimal import Decimal
 from xml.dom.minidom import Document
-from xml.dom import Element
 
 from lxml import etree
 from lxml.builder import E
@@ -113,20 +112,22 @@ class Cielo(object):
         return self.URL
 
     def dadosEc(self):
-        e = E("dados-ec",
+        e = E(
+            "dados-ec",
             E.numero(self.__store_id),
             E.chave(self.__sotre_key),
-            )
+        )
         return e
 
     def dadosPedido(self):
-        e = E("dados-pedido",
-                E.numero(self.__pedido),
-                E.valor(self.__valor),
-                E.moeda('986'),
-                E("data-hora", datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")),
-                E.idioma('PT')
-            )
+        e = E(
+            "dados-pedido",
+            E.numero(self.__pedido),
+            E.valor(self.__valor),
+            E.moeda('986'),
+            E("data-hora", datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")),
+            E.idioma('PT')
+        )
         return e
 
     def urlRetorno(self):
